@@ -21,7 +21,10 @@
 			"secret_name": "ROBLOX_SECURITY_2",
 			"binding": "ROBLOX_SECURITY_2"
 		}
-	]
+	],
+	"vars": {
+		"ROBLOX_USER_ID": "276241996",
+	}
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
