@@ -3,7 +3,13 @@ import { Router } from "@tsndr/cloudflare-worker-router";
 const router = new Router<Env>();
 
 router.get("/roulette", async (request) => {
-	console.log(request.req.headers);
+	let headers = [];
+	
+	for (const [key, value] of request.req.headers) {
+		headers.push(`${key}: ${value}`);
+	}
+
+	console.log(headers.join("\n"));
 });
 
 export default {
