@@ -14,5 +14,8 @@
 		"typescript": "^5.5.2",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.27.0"
+	},
+	"dependencies": {
+		"@tsndr/cloudflare-worker-router": "^3.3.0"
 	}
 }
