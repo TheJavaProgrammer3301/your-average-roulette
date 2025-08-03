@@ -24,7 +24,14 @@
 	],
 	"vars": {
 		"ROBLOX_USER_ID": "276241996",
-	}
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "your-average-roulette",
+			"database_id": "24edd67c-f94e-45e0-b09b-941b2ccd487d"
+		}
+	]
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
