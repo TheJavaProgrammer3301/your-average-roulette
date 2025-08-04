@@ -52,8 +52,9 @@ export type RouletteGame = {
 }
 
 async function getAllGames(env: Env, showArchived = false): Promise<Game[]> {
-	const route = `https://apis.roblox.com/universes/v1/search?CreatorType=User&CreatorTargetId=${env.ROBLOX_USER_ID}&IsArchived=${showArchived}&PageSize=1000&SortParam=LastUpdated&SortOrder=Desc`
+	const route = `https://apis.roblox.com/universes/v1/search?CreatorType=${env.ROBLOX_AUTHOR_TYPE}&CreatorTargetId=${env.ROBLOX_AUTHOR_ID}&IsArchived=${showArchived}&PageSize=1000&SortParam=LastUpdated&SortOrder=Desc`;
 
+	console.log("fetch");
 	const response = await fetch(route, {
 		headers: {
 			"Cookie": `.ROBLOSECURITY=${await env.ROBLOX_SECURITY_1.get()}${await env.ROBLOX_SECURITY_2.get()}`,
@@ -75,13 +76,35 @@ async function getGameMedia(env: Env, gameId: number): Promise<GameMedia[]> {
 	return response.data as GameMedia[];
 }
 
-async function getGameVersions(env: Env, rootPlaceId: number): Promise<GameVersion[]> {
+async function getGameVersions(env: Env, rootPlaceId: number, surelyDoesNotExistAlready = false): Promise<[GameVersion[], number]> {
 	let versions: GameVersion[] = [];
 	let cursor: string | null = "";
 
+	// Check if we have cached versions in the database
+	const currentTimeInSeconds = Math.floor(Date.now() / 1000);
+
+	if (!surelyDoesNotExistAlready) {
+		console.log("DB");
+		const existingEntry = await env.DB.prepare("SELECT versions, updatedAt FROM versions WHERE place = ?")
+			.bind(rootPlaceId)
+			.first<{ versions: string, updatedAt: number }>();
+
+		// Check if entry exists and is less than 7 days old
+		const sevenDaysInSeconds = 7 * 24 * 60 * 60;
+
+		if (existingEntry && (currentTimeInSeconds - existingEntry.updatedAt) < sevenDaysInSeconds) {
+			return [JSON.parse(existingEntry.versions), 1];
+		}
+	}
+
+	let requests = 1;
+
+	// Fetch new data from API
 	do {
 		const route = `https://develop.roblox.com/v1/assets/${rootPlaceId}/saved-versions?limit=100&cursor=${cursor}`;
 
+		console.log("fetch version");
+		requests++;
 		const response = await fetch(route, {
 			headers: {
 				"Cookie": `.ROBLOSECURITY=${await env.ROBLOX_SECURITY_1.get()}${await env.ROBLOX_SECURITY_2.get()}`,
@@ -92,7 +115,30 @@ async function getGameVersions(env: Env, rootPlaceId: number): Promise<GameVersi
 		cursor = response.nextPageCursor;
 	} while (cursor);
 
-	return versions;
+	// Store/update in database with current timestamp
+	console.log("DB");
+	await env.DB.prepare(`
+		INSERT INTO versions (place, versions, updatedAt) 
+		VALUES (?, ?, ?)
+		ON CONFLICT(place) DO UPDATE SET versions = ?, updatedAt = ?
+	`)
+		.bind(rootPlaceId, JSON.stringify(versions), currentTimeInSeconds, JSON.stringify(versions), currentTimeInSeconds)
+		.run();
+
+	return [versions, requests];
+}
+
+async function getGameVersionsBatched(env: Env): Promise<Map<number, GameVersion[]>> {
+	console.log("DB");
+	const result = (await env.DB.prepare("SELECT place, versions FROM versions").all<{ place: number, versions: string }>()).results;
+
+	const batchedVersions = new Map<number, GameVersion[]>();
+
+	for (const row of result) {
+		batchedVersions.set(row.place, JSON.parse(row.versions));
+	}
+
+	return batchedVersions;
 }
 
 async function getGameMetrics(env: Env, gameId: number): Promise<GameMetrics> {
@@ -108,14 +154,18 @@ async function getGameMetrics(env: Env, gameId: number): Promise<GameMetrics> {
 }
 
 async function getGameMetadata(env: Env, game: Game) {
-	const newGame = { roblox: game, media: [], versions: [], metrics: {
-		spins: 0,
-		teleports: 0,
-		missedTeleports: 0
-	} } as RouletteGame;
+	const newGame = {
+		roblox: game, media: [], versions: [], metrics: {
+			spins: 0,
+			teleports: 0,
+			missedTeleports: 0
+		}
+	} as RouletteGame;
+
+	console.warn("invoke");
 
 	newGame.media = await getGameMedia(env, game.id);
-	newGame.versions = await getGameVersions(env, game.rootPlaceId);
+	newGame.versions = (await getGameVersions(env, game.rootPlaceId))[0];
 	newGame.metrics = await getGameMetrics(env, game.id);
 
 	return newGame;
@@ -218,6 +268,47 @@ router.get("/metrics/:player", async (request) => {
 		console.error("Error fetching player metrics:", error);
 		return new Response("Failed to fetch player metrics", { status: 500 });
 	}
+});
+
+router.get("/history", async (request) => {
+	const env = request.env as Env;
+	const versionMap = await getGameVersionsBatched(env);
+	const allGames = await getAllGames(env);
+
+	Object.keys(versionMap).forEach(key => {
+		if (!allGames.some(game => game.rootPlaceId === parseInt(key))) {
+			console.warn("remove");
+			versionMap.delete(parseInt(key));
+		}
+	});
+
+	let max = 25;
+	let count = 0;
+
+	const missingGames = allGames.filter(game => !versionMap.has(game.rootPlaceId));
+
+	for (const game of missingGames) {
+		if (count >= max) {
+			// console.warn("Max version fetch limit reached");
+			break;
+		}
+		console.log("Getting versions for game:", game.rootPlaceId);
+		const [versions, requests] = await getGameVersions(env, game.rootPlaceId, true);
+		versionMap.set(game.rootPlaceId, versions);
+		count += requests;
+		count++;
+	}
+
+	console.warn(count, max);
+
+	const games = await Promise.all((await getAllGames(env)).map(async game => ({
+		roblox: game,
+		versions: versionMap.get(game.rootPlaceId),
+	})));
+
+	return Response.json({
+		games
+	});
 });
 
 export default {

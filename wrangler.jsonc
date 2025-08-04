@@ -23,7 +23,10 @@
 		}
 	],
 	"vars": {
-		"ROBLOX_USER_ID": "276241996",
+		"ROBLOX_AUTHOR_ID": "276241996",
+		"ROBLOX_AUTHOR_TYPE": "User",
+		// "ROBLOX_AUTHOR_ID": "35230894",
+		// "ROBLOX_AUTHOR_TYPE": "Group",
 	},
 	"d1_databases": [
 		{
